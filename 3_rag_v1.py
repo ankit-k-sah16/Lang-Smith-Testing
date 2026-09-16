@@ -52,25 +52,40 @@ print(f"Created {len(splits)} chunks")
 # 3. Create embeddings
 # --------------------------------------------------
 
+# 3) Embed + index
+
 emb = OllamaEmbeddings(
     model="nomic-embed-text:latest",
     base_url="http://127.0.0.1:11434"
 )
 
-# Test embedding before creating vector DB
+# Test embedding
 test_embedding = emb.embed_query("Hello world")
-
 print(f"Embedding dimension: {len(test_embedding)}")
 
-
-# --------------------------------------------------
-# 4. Create Chroma vector database
-# --------------------------------------------------
-
-vs = Chroma.from_documents(
-    documents=splits,
-    embedding=emb
+# Create persistent Chroma database
+vs = Chroma(
+    collection_name="rag_collection",
+    embedding_function=emb,
+    persist_directory="./chroma_db"
 )
+
+# Add documents in batches
+batch_size = 25
+
+for i in range(0, len(splits), batch_size):
+
+    batch = splits[i:i + batch_size]
+
+    print(
+        f"Adding chunks "
+        f"{i + 1}-{min(i + batch_size, len(splits))}"
+        f"/{len(splits)}"
+    )
+
+    vs.add_documents(batch)
+
+print("✅ All chunks embedded and stored!")
 
 retriever = vs.as_retriever(
     search_type="similarity",
@@ -100,7 +115,7 @@ prompt = ChatPromptTemplate.from_messages([
 # --------------------------------------------------
 
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="qwen/qwen3.8-27b",
     temperature=0
 )
 
