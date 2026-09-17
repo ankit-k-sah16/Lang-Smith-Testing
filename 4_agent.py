@@ -1,10 +1,13 @@
-from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langchain_core.tools import tool
 import requests
+from langchain_core.prompts import PromptTemplate
 from langchain_community.tools import DuckDuckGoSearchRun
-from langchain.agents import create_react_agent, AgentExecutor
-from langchain import hub
+from langchain.agents import create_agent
+
 from dotenv import load_dotenv
+import os 
+os.environ['LANGCHAIN_PROJECT'] = 'ReAct Agent Demo'
 
 load_dotenv()
 
@@ -12,41 +15,66 @@ search_tool = DuckDuckGoSearchRun()
 
 @tool
 def get_weather_data(city: str) -> str:
-  """
-  This function fetches the current weather data for a given city
-  """
-  url = f'https://api.weatherstack.com/current?access_key=f07d9636974c4120025fadf60678771b&query={city}'
+    """
+    This function fetches the current weather data for a given city
+    """
+    api_key=os.getenv('WEATHERSTACK_API_KEY')
 
-  response = requests.get(url)
+    url = (
+        f"https://api.weatherstack.com/current"
+        f"?access_key={api_key}&query={city}"
+    )
+    response = requests.get(url)
 
-  return response.json()
+    if response.status_code !=200:
+        return f"Weatherstack api request failed :{response.status_code}"
 
-llm = ChatOpenAI()
+    data = response.json()
 
-# Step 2: Pull the ReAct prompt from LangChain Hub
-prompt = hub.pull("hwchase17/react")  # pulls the standard ReAct agent prompt
+    if "error" in data:
+        return f"Weather API error: {data['error']}"
 
-# Step 3: Create the ReAct agent manually with the pulled prompt
-agent = create_react_agent(
-    llm=llm,
+    current = data.get("current", {})
+
+    return (
+        f"City: {city}\n"
+        f"Temperature: {current.get('temperature')}°C\n"
+        f"Weather: {current.get('weather_descriptions')}\n"
+        f"Humidity: {current.get('humidity')}%\n"
+        f"Wind Speed: {current.get('wind_speed')} km/h"
+    )
+
+
+llm = ChatGroq(model='openai/gpt-oss-20b',temperature=0.7)
+
+
+agent = create_agent(
+    model=llm,
     tools=[search_tool, get_weather_data],
-    prompt=prompt
+    system_prompt=(
+        "You are a helpful assistant. "
+        "Use the available tools whenever they are needed. "
+        "Use the weather tool for current weather information "
+        "and the search tool for web searches."
+    )
 )
 
-# Step 4: Wrap it with AgentExecutor
-agent_executor = AgentExecutor(
-    agent=agent,
-    tools=[search_tool, get_weather_data],
-    verbose=True,
-    max_iterations=5
-)
 
 # What is the release date of Dhadak 2?
 # What is the current temp of gurgaon
 # Identify the birthplace city of Kalpana Chawla (search) and give its current temperature.
 
-# Step 5: Invoke
-response = agent_executor.invoke({"input": "What is the current temp of gurgaon"})
-print(response)
+# Step 5: Invoke Agent
+response = agent.invoke( {
+        "messages": [
+            {
+                "role": "user",
+                "content": "What is the current temperature of Mumbai?"
+            }
+        ]})
 
-print(response['output'])
+print(response)
+print("\nFinal Answer:")
+for message in response["messages"]:
+    if hasattr(message, "content") and message.content:
+        print(message.content)
